@@ -1,5 +1,6 @@
 package com.mycompany.app;
 
+import com.google.common.collect.Iterables;
 import scala.Tuple2;
 
 import org.apache.spark.api.java.*;
@@ -19,6 +20,7 @@ public final class SparkTopKMostRelevantDocuments {
 
     //set the input files
     JavaPairRDD<String, String> textFiles = sc.wholeTextFiles("datafiles");
+    long numOfDocs = textFiles.keys().count();
     List<String> stopWords = sc.textFile("stopwords.txt").collect();
 
     //stage 1 starting
@@ -41,10 +43,28 @@ public final class SparkTopKMostRelevantDocuments {
     // stage 1 completed
 
     // starting stage 2
-
+      JavaPairRDD<String, Iterable<Tuple2<String, Double>>> stage2output = stage1output.mapToPair(
+              s -> {
+                 String[] word = s._1.split("@");
+                 Tuple2<String, Integer> fileAndFreq= new Tuple2<>(word[1], s._2);
+                 return new Tuple2<>(word[0], fileAndFreq);
+              }).groupByKey()
+              .mapToPair(s -> {
+                  ArrayList<Tuple2<String, Double>> outputListByFileName = new ArrayList<Tuple2<String, Double>>();
+                  long numberOfOccurences = Iterables.size(s._2);
+                  for(Tuple2<String, Integer> tuple: s._2){
+                    double tfIdfValue = calculateTfIdf(numOfDocs, tuple._2, numberOfOccurences);
+                    outputListByFileName.add(new Tuple2<>(tuple._1, tfIdfValue));
+                  }
+                  return new Tuple2<>(s._1, outputListByFileName);
+              });
     //set the output folder
-    stage1output.saveAsTextFile("outfile");
+    stage2output.saveAsTextFile("outfile");
     //stop spark
   }
+
+    private static double calculateTfIdf(long numOfDocs, Integer freq, long numberOfOccurences) {
+      return 1 + Math.log(freq) *  Math.log(numOfDocs/numberOfOccurences);
+    }
 
 }
