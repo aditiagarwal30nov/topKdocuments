@@ -1,6 +1,7 @@
 package com.mycompany.app;
 
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import scala.Tuple2;
 
 import org.apache.spark.api.java.*;
@@ -43,7 +44,7 @@ public final class SparkTopKMostRelevantDocuments {
     // stage 1 completed
 
     // starting stage 2
-      JavaPairRDD<String, Iterable<Tuple2<String, Double>>> stage2output = stage1output.mapToPair(
+      JavaPairRDD<String, Tuple2<String, Double>> stage2output = stage1output.mapToPair(
               s -> {
                  String[] word = s._1.split("@");
                  Tuple2<String, Integer> fileAndFreq= new Tuple2<>(word[1], s._2);
@@ -57,7 +58,8 @@ public final class SparkTopKMostRelevantDocuments {
                     outputListByFileName.add(new Tuple2<>(tuple._1, tfIdfValue));
                   }
                   return new Tuple2<>(s._1, outputListByFileName);
-              });
+              })
+              .flatMapValues(s -> Lists.newArrayList(s));
     //set the output folder
     stage2output.saveAsTextFile("outfile");
     //stop spark
