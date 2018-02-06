@@ -27,7 +27,8 @@ public final class SparkTopKMostRelevantDocuments {
         //stage 1 starting
         JavaPairRDD<String, Integer> stage1output = textFiles
                 .flatMap(s -> {
-                    List<String> inputListByFileName = Arrays.asList(s._2.split(" "));
+                    String replacedLineEndings = s._2.replace("\n", " ").replace("\r", " ");
+                    List<String> inputListByFileName = Arrays.asList(replacedLineEndings.split(" "));
                     ArrayList<String> outputListByFileName = new ArrayList<String>();
                     Path p = Paths.get(s._1);
                     String filename = p.getFileName().toString();
@@ -51,13 +52,13 @@ public final class SparkTopKMostRelevantDocuments {
                     return new Tuple2<>(word[0], fileAndFreq);
                 }).groupByKey()
                 .mapToPair(s -> {
-                    ArrayList<Tuple2<String, Double>> outputListByFileName = new ArrayList<Tuple2<String, Double>>();
+                    ArrayList<Tuple2<String, Double>> tfIdfVector = new ArrayList<Tuple2<String, Double>>();
                     long numberOfOccurences = Iterables.size(s._2);
                     for (Tuple2<String, Integer> tuple : s._2) {
                         double tfIdfValue = calculateTfIdf(numOfDocs, tuple._2, numberOfOccurences);
-                        outputListByFileName.add(new Tuple2<>(tuple._1, tfIdfValue));
+                        tfIdfVector.add(new Tuple2<>(tuple._1, tfIdfValue));
                     }
-                    return new Tuple2<>(s._1, outputListByFileName);
+                    return new Tuple2<>(s._1, tfIdfVector);
                 })
                 .flatMapValues(s -> Lists.newArrayList(s))
                 .mapToPair(s -> {
@@ -66,9 +67,39 @@ public final class SparkTopKMostRelevantDocuments {
                 });
 
         // stage 2 complete
+
+        // starting stage 3
+        JavaPairRDD<String, Double> stage3output = stage2output.mapToPair(
+                s -> {
+                    String[] word = s._1.split("@");
+                    return new Tuple2<>(word[1], new Tuple2<>(word[0], s._2));
+                })
+                .groupByKey()
+                .mapToPair(s -> {
+                    ArrayList<Tuple2<String, Double>> normalizedTfIdfVector = new ArrayList<Tuple2<String, Double>>();
+                    double sumOfSquares = 0.0;
+                    long numberOfOccurences = Iterables.size(s._2);
+                    for (Tuple2<String, Double> tuple : s._2) {
+                        sumOfSquares += (tuple._2) * (tuple._2);
+                    }
+                    for (Tuple2<String, Double> tuple : s._2) {
+                        double normalizedtfIdfValue = calculateNormalizedTfIdf(sumOfSquares, tuple._2);
+                        normalizedTfIdfVector.add(new Tuple2<>(tuple._1, normalizedtfIdfValue));
+                    }
+                    return new Tuple2<>(s._1, normalizedTfIdfVector);
+                })
+                .flatMapValues(s -> Lists.newArrayList(s))
+                .mapToPair(s -> {
+                    String key = s._2._1 + "@" + s._1;
+                    return new Tuple2<>(key, s._2._2);
+                });
         //set the output folder
-        stage2output.saveAsTextFile("outfile");
+        stage3output.saveAsTextFile("outfile");
         //stop spark
+    }
+
+    private static double calculateNormalizedTfIdf(Double sumOfSquares, double freq) {
+        return (freq / Math.sqrt(sumOfSquares));
     }
 
     private static double calculateTfIdf(long numOfDocs, Integer freq, long numberOfOccurences) {
